@@ -1,0 +1,14 @@
+-- ============================================================
+-- YOUR BOILER LTD — PRODUCTION SEED & FIRST ADMIN SETUP
+-- Note: All dummy data has been removed for production.
+-- ============================================================
+
+-- To create your first Admin user:
+-- 1. Sign up through the application at http://localhost:3000/auth/signup (or your production URL).
+-- 2. Run the SQL snippet below in Supabase SQL Editor, replacing 'your-email@example.com' with your actual email:
+--
+-- UPDATE public.profiles
+-- SET role = 'admin'
+-- WHERE email = 'your-email@example.com';
+--
+-- This immediately grants full Admin privileges to your account.
