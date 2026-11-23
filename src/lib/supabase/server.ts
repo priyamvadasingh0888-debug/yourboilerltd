@@ -1,4 +1,5 @@
 import { createServerClient } from '@supabase/ssr'
+import { createClient as createSupabaseClient } from '@supabase/supabase-js'
 import { cookies } from 'next/headers'
 import { Database } from '@/types/database'
 import { createMockClient } from './mock-client'
@@ -67,24 +68,10 @@ export async function createServiceClient() {
     return createMockClient()
   }
 
-  const cookieStore = await cookies()
-
-  return createServerClient<Database>(
+  return createSupabaseClient<Database>(
     getSupabaseUrl(),
     getServiceKey(),
     {
-      cookies: {
-        getAll() {
-          return cookieStore.getAll()
-        },
-        setAll(cookiesToSet) {
-          try {
-            cookiesToSet.forEach(({ name, value, options }) =>
-              cookieStore.set(name, value, options)
-            )
-          } catch {}
-        },
-      },
       auth: {
         autoRefreshToken: false,
         persistSession: false,

@@ -85,12 +85,54 @@ export async function POST(request: NextRequest) {
     const supabase = await createServiceClient()
 
     // 1. Create the Supabase Auth user (email pre-confirmed so they can log in immediately)
-    const { data: authData, error: authError } = await supabase.auth.admin.createUser({
+    let authData: any = null
+    let authError: any = null
+
+    const createRes = await supabase.auth.admin.createUser({
       email,
       password,
       email_confirm: true,
       user_metadata: { role: 'engineer', full_name: name },
     })
+
+    authData = createRes.data
+    authError = createRes.error
+
+    // If account was previously registered (e.g. deleted/orphaned engineer account), clean up and recreate
+    if (authError && (authError.message.toLowerCase().includes('already') || authError.status === 422)) {
+      const { data: listRes } = await supabase.auth.admin.listUsers()
+      const existingUser = listRes?.users?.find(
+        (u: any) => u.email?.toLowerCase() === email.toLowerCase()
+      )
+
+      if (existingUser) {
+        const { data: activeEng } = await supabase
+          .from('engineers')
+          .select('id')
+          .eq('profile_id', existingUser.id)
+          .maybeSingle()
+
+        if (!activeEng) {
+          // No active engineer record: clean up orphaned records and purge old auth user
+          await supabase.from('jobs').update({ created_by: null }).eq('created_by', existingUser.id)
+          await supabase.from('job_status_history').update({ changed_by: null }).eq('changed_by', existingUser.id)
+          await supabase.from('job_notes').delete().eq('author_id', existingUser.id)
+          await supabase.from('notifications').delete().eq('user_id', existingUser.id)
+          await supabase.auth.admin.deleteUser(existingUser.id)
+          await supabase.from('profiles').delete().eq('id', existingUser.id)
+
+          // Recreate cleanly
+          const retryRes = await supabase.auth.admin.createUser({
+            email,
+            password,
+            email_confirm: true,
+            user_metadata: { role: 'engineer', full_name: name },
+          })
+          authData = retryRes.data
+          authError = retryRes.error
+        }
+      }
+    }
 
     if (authError) {
       return NextResponse.json({ error: authError.message }, { status: 400 })

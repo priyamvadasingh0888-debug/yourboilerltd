@@ -233,6 +233,8 @@ export async function deleteEngineer(engineerId: string) {
       .eq('id', engineerId)
       .single()
 
+    const profileId = eng?.profile_id
+
     // 5. Delete engineer record
     const { error: delErr } = await admin
       .from('engineers')
@@ -244,32 +246,27 @@ export async function deleteEngineer(engineerId: string) {
       return { error: delErr.message }
     }
 
-    // 6. Clean up profile references and delete auth user
-    if (eng?.profile_id) {
-      try {
-        // Clear foreign key references to this profile
-        await admin.from('jobs').update({ created_by: null }).eq('created_by', eng.profile_id)
-        await admin.from('job_status_history').update({ changed_by: null }).eq('changed_by', eng.profile_id)
-        await admin.from('job_notes').delete().eq('author_id', eng.profile_id)
-        await admin.from('notifications').delete().eq('user_id', eng.profile_id)
+    // 6. Clean up profile references and permanently delete auth user & profile
+    if (profileId) {
+      // Clear foreign key references to this profile
+      await admin.from('jobs').update({ created_by: null }).eq('created_by', profileId)
+      await admin.from('job_status_history').update({ changed_by: null }).eq('changed_by', profileId)
+      await admin.from('job_notes').delete().eq('author_id', profileId)
+      await admin.from('notifications').delete().eq('user_id', profileId)
 
-        // Hard-ban auth user and scrub metadata to kill any active session tokens immediately
-        await admin.auth.admin.updateUserById(eng.profile_id, {
+      // Hard-delete auth user from Supabase so the email can be re-registered immediately
+      const { error: authDelErr } = await admin.auth.admin.deleteUser(profileId)
+      if (authDelErr) {
+        logger.warn('Could not hard-delete auth user, banning user as fallback', { profileId, error: authDelErr })
+        await admin.auth.admin.updateUserById(profileId, {
           ban_duration: '876000h',
           user_metadata: { role: 'inactive', status: 'deleted' },
           app_metadata: { role: 'inactive', status: 'deleted' },
         })
-
-        // Delete auth user from Supabase
-        await admin.auth.admin.deleteUser(eng.profile_id)
-
-        // Delete profile record
-        await admin.from('profiles').delete().eq('id', eng.profile_id)
-      } catch (authErr) {
-        logger.warn('Could not complete full auth deletion for engineer', { profile_id: eng.profile_id, error: authErr })
-        // Fallback: Ensure role is marked inactive in profile if hard delete failed
-        await admin.from('profiles').update({ role: 'inactive' }).eq('id', eng.profile_id)
       }
+
+      // Delete profile record
+      await admin.from('profiles').delete().eq('id', profileId)
     }
 
     logger.info('Engineer deleted successfully', { engineerId })
